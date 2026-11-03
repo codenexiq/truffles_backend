@@ -1,0 +1,148 @@
+# ============================================================
+# Truffles API: test on every push, deploy to the live server over SSH on every push to `main`.
+#
+# All server access settings live here (SSH host, user, key, known_hosts, port).
+# The VALUES are stored as GitHub secrets, never in this file. See DEPLOYMENT.md.
+# ============================================================
+name: Test and deploy (API)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer push waits instead of cancelling a deployment half way through.
+concurrency:
+  group: deploy-api-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: truffles-api
+  KEEP_RELEASES: "5"
+  HEALTH_URL: http://127.0.0.1:5001/api/v1/health
+
+jobs:
+  verify:
+    name: Build and security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - name: Dependency vulnerabilities (high and above)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Type check and build
+        run: npm run build
+      - name: Security test suite against the compiled server
+        run: npm run security:ci
+
+      - name: Assemble release package
+        run: |
+          mkdir release
+          cp -r dist release/dist
+          cp package.json package-lock.json ecosystem.config.cjs release/
+          tar -C release -czf release.tgz .
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: api-release
+          path: release.tgz
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to server (SSH)
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+    steps:
+      - name: Check deployment is configured
+        id: cfg
+        env:
+          HAS_KEY: ${{ secrets.SSH_PRIVATE_KEY != '' }}
+          HAS_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS != '' }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$DEPLOY_PATH" ] || [ "$HAS_KEY" != "true" ] || [ "$HAS_KNOWN_HOSTS" != "true" ]; then
+            echo "::notice::Deployment skipped: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS (secrets) and DEPLOY_PATH (variable) are not all set yet. See DEPLOYMENT.md."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ "$DEPLOY_PATH" == *..* ]]; then
+            echo "::error::DEPLOY_PATH must be an absolute path such as /var/www/truffles-api"; exit 1
+          fi
+          if ! [[ "$SSH_HOST" =~ ^[A-Za-z0-9.:-]+$ ]] || ! [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            echo "::error::SSH_HOST or SSH_USER has unexpected characters"; exit 1
+          fi
+          if [ -n "$SSH_PORT" ] && ! [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]; then
+            echo "::error::SSH_PORT must be a number"; exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy
+
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: api-release
+
+      - name: Configure SSH
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          (umask 077; printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key)
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host truffles-server
+            HostName ${SSH_HOST}
+            User ${SSH_USER}
+            Port ${SSH_PORT:-22}
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            BatchMode yes
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+          EOF
+          chmod 600 ~/.ssh/config
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null || { echo "::error::SSH_PRIVATE_KEY is not a valid private key"; exit 1; }
+
+      - name: Upload and activate release
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          mkdir pkg && tar -xzf release.tgz -C pkg
+          ssh truffles-server "mkdir -p '${DEPLOY_PATH}/releases/${RELEASE_ID}' '${DEPLOY_PATH}/shared'"
+          rsync -az --delete -e ssh pkg/ "truffles-server:${DEPLOY_PATH}/releases/${RELEASE_ID}/"
+          ssh truffles-server bash -s -- "$DEPLOY_PATH" "$RELEASE_ID" "$KEEP_RELEASES" "$APP_NAME" "$HEALTH_URL" api < deploy/remote-release.sh
+
+      - name: Remove SSH key from the runner
+        if: always()
+        run: rm -rf ~/.ssh
