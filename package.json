@@ -23,6 +23,14 @@
   "author": "Truffles Cafe Team",
   "license": "ISC",
   "dependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^24.19.2",
+    "@types/nodemailer": "^8.0.2",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -33,19 +41,11 @@
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.12.1",
     "nodemailer": "^10.3.1",
+    "typescript": "^7.0.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/cookie-parser": "^1.4.10",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/morgan": "^1.9.10",
-    "@types/node": "^24.19.2",
-    "@types/nodemailer": "^8.0.2",
-    "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "tsx": "^4.23.15"
   },
   "engines": {
     "node": ">=24 <25"

@@ -7,10 +7,10 @@ node_modules/
 dist/
 build/
 
-# Environment variables
+# Environment variables and anything that holds a secret (only .env.example is committed)
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 
 # Logs
 logs/
