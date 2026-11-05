@@ -43,6 +43,14 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().default('"Truffles Rooftop Restaurant" <reservations@example.com>'),
 
+  /** MySQL database (Hostinger: host 127.0.0.1 when the API runs on the same server). Leave DB_NAME empty to keep data in memory. */
+  DB_HOST: z.string().default("127.0.0.1"),
+  DB_PORT: int("3306", 1, 65535),
+  DB_NAME: z.string().optional(),
+  DB_USER: z.string().optional(),
+  DB_PASSWORD: z.string().optional(),
+  DB_CONNECTION_LIMIT: int("8", 1, 50),
+
   RATE_LIMIT_WINDOW_MS: int("900000", 1000, 86_400_000),
   RATE_LIMIT_MAX: int("100", 1, 100_000),
   /** Submissions per window per IP on public forms (reservations, contact, reviews, newsletter, orders). */

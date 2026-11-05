@@ -109,6 +109,7 @@ backend/
 | `npm start` | Run compiled production build (`node dist/server.js`) |
 | `npm run clean` | Clean up `dist/` directory |
 | `npm audit` | Check dependencies security (0 vulnerabilities) |
+| `npm run test:dashboard` | Start the compiled API with demo data and test the staff dashboard routes (`npm run build` first) |
 
 ---
 
@@ -169,6 +170,37 @@ All endpoints are prefixed with `/api/v1`.
 - `POST /api/v1/auth/logout` - Logout & clear token
 - `GET /api/v1/auth/me` - Authenticated user profile
 - `POST /api/v1/auth/register-staff` - Register staff account *(Admin only)*
+
+### 10. Staff Dashboard (`src/modules/dashboard/`)
+All routes need a staff login (same cookie/token as above). They read the same MySQL `reservations` table the public
+booking form writes to. New dashboard sections go in sibling folders next to `reservations/`.
+- `GET /api/v1/dashboard/reservations` - List with `status`, `q` (name/email/phone), `date`, `from`, `to`, `sort` (`newest|date_asc|date_desc`), `page`, `limit` (max 100)
+- `GET /api/v1/dashboard/reservations/stats` - Counts: today, next 7 days, per status
+- `GET /api/v1/dashboard/reservations/:id` - One reservation
+- `GET /api/v1/dashboard/reservations/:id/history` - Who changed the status, and when
+- `PATCH /api/v1/dashboard/reservations/:id/status` - Confirm / cancel / complete / back to pending *(manager and above)*
+
+### 11. Blog & Pictures
+- `GET /api/v1/blog/posts` and `GET /api/v1/blog/posts/:slug` - Published posts for the website *(public, cacheable for a minute)*
+- `GET /api/v1/media/:id` - A picture uploaded from the dashboard *(public, cacheable for a year)*
+- `POST /api/v1/dashboard/media` - Upload a picture: send the image itself as the request body with its `image/jpeg|png|webp|gif`
+  type (3 MB max; the type is checked from the file's own bytes; SVG is refused). The same file twice is stored once.
+- `GET|POST /api/v1/dashboard/blog/posts`, `GET|PUT|DELETE /api/v1/dashboard/blog/posts/:id`,
+  `PATCH /api/v1/dashboard/blog/posts/:id/status` - Manage posts *(write: manager and above; delete: admin and above)*.
+  A post's content is a list of blocks (paragraph, heading, list, quote, note, picture, gallery, YouTube video, button)
+  with strict limits; pictures must be `/images/...` or `/media/<id>`, and links `/page` or `https://...`.
+
+### 12. Maintenance mode
+- `GET /api/v1/site/status` - Is the website in maintenance mode? *(public; the website checks it every few seconds, so it has its own generous rate limit)*. Returns only `{ maintenance: { enabled: false } }` while open, or the title, message and expected time while on.
+- `GET /api/v1/dashboard/maintenance` and `/history` - Current settings and the last 10 switches *(all staff)*
+- `PUT /api/v1/dashboard/maintenance` - Switch on/off and set the visitor message *(admins only)*; every change is logged with who made it
+
+**Database** (MySQL, created automatically on start by `src/db/schema.ts`; add new steps at the end, never edit old ones):
+`reservations`, `staff_users` (login accounts), `reservation_status_history`, `media` (uploaded pictures), `blog_posts`, `site_maintenance` (one row) and `site_maintenance_log`.
+The history, media and blog tables have foreign keys to the staff table / reservations:
+deleting a reservation deletes its history (`CASCADE`); removing a staff account keeps the history and clears the
+name (`SET NULL`). Reservation indexes follow the dashboard's queries: `(status, reservation_date)`,
+`(status, created_at)`, `(reservation_date, status)` and `(created_at)`.
 
 
 

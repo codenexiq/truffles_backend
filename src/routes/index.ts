@@ -7,6 +7,10 @@ import { contactRoutes } from "../modules/contact/contact.routes.js";
 import { newsletterRoutes } from "../modules/newsletter/newsletter.routes.js";
 import { reviewRoutes } from "../modules/reviews/review.routes.js";
 import { eventRoutes } from "../modules/events/event.routes.js";
+import { dashboardRoutes } from "../modules/dashboard/dashboard.routes.js";
+import { blogRoutes } from "../modules/blog/blog.routes.js";
+import { mediaRoutes } from "../modules/media/media.routes.js";
+import { siteRoutes } from "../modules/site/site.routes.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 
 const router = Router();
@@ -25,6 +29,13 @@ router.use("/contact", contactRoutes);
 router.use("/newsletter", newsletterRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/events", eventRoutes);
+// Published blog posts and uploaded pictures, for the website (read-only, public)
+router.use("/blog", blogRoutes);
+router.use("/media", mediaRoutes);
+// Public: is the site in maintenance mode? (checked by the website before it shows a page)
+router.use("/site", siteRoutes);
+// Staff dashboard (login required on every route inside)
+router.use("/dashboard", dashboardRoutes);
 
 export const apiRouter = router;
 

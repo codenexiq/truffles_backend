@@ -1,3 +1,4 @@
+import type { AuthenticatedRequest } from "../../types/index.js";
 import type { Request, Response, NextFunction } from "express";
 import { ReservationService } from "./reservation.service.js";
 import { ApiResponse } from "../../utils/apiResponse.js";
@@ -48,7 +49,10 @@ export class ReservationController {
 
   static async updateStatus(req: Request, res: Response, next: NextFunction) {
     try {
-      const reservation = await ReservationService.updateStatus(req.params.id as string, req.body.status);
+      const reservation = await ReservationService.updateStatus(req.params.id as string, req.body.status, {
+        source: "staff",
+        staffId: (req as AuthenticatedRequest).user?.id,
+      });
       return ApiResponse.success(res, "Reservation status updated successfully", ReservationService.toStaffView(reservation));
     } catch (error) {
       next(error);

@@ -1,28 +1,20 @@
-import { mockDb, pushCapped, type ReservationRecord } from "../../data/mockDb.js";
+import type { ReservationRecord } from "../../data/mockDb.js";
+import { reservationRepository } from "./reservation.repository.js";
 import { newId, newSecretToken, safeEqual, sha256 } from "../../utils/secure.js";
 import { ApiError } from "../../utils/apiError.js";
 import type { ReservationStatusType } from "../../constants/index.js";
+import type { StatusActor } from "./statusHistory.js";
 
 export class ReservationService {
   static async getAll(filters?: {
     date?: string;
     status?: ReservationStatusType;
   }): Promise<ReservationRecord[]> {
-    let list = [...mockDb.reservations];
-
-    if (filters?.date) {
-      list = list.filter((r) => r.date === filters.date);
-    }
-
-    if (filters?.status) {
-      list = list.filter((r) => r.status === filters.status);
-    }
-
-    return list.sort((a, b) => new Date(`${b.date} ${b.time}`).getTime() - new Date(`${a.date} ${a.time}`).getTime());
+    return reservationRepository.list(filters);
   }
 
   static async getById(id: string): Promise<ReservationRecord> {
-    const res = mockDb.reservations.find((r) => r.id === id);
+    const res = await reservationRepository.getById(id);
     if (!res) {
       throw ApiError.notFound(`Reservation with ID '${id}' not found`);
     }
@@ -49,18 +41,20 @@ export class ReservationService {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    pushCapped(mockDb.reservations, record);
+    await reservationRepository.insert(record);
     return { record, cancelToken };
   }
 
   static async updateStatus(
     id: string,
-    status: ReservationStatusType
+    status: ReservationStatusType,
+    actor: StatusActor = { source: "staff" }
   ): Promise<ReservationRecord> {
-    const res = await this.getById(id);
-    res.status = status;
-    res.updatedAt = new Date().toISOString();
-    return res;
+    const updated = await reservationRepository.updateStatus(id, status, new Date().toISOString(), actor);
+    if (!updated) {
+      throw ApiError.notFound(`Reservation with ID '${id}' not found`);
+    }
+    return updated;
   }
 
   /**
@@ -68,11 +62,11 @@ export class ReservationService {
    * booking response. Every failure looks the same, so ids cannot be probed.
    */
   static async cancelWithToken(id: string, token: string): Promise<ReservationRecord> {
-    const res = mockDb.reservations.find((r) => r.id === id);
+    const res = await reservationRepository.getById(id);
     const ok = !!res && !!res.cancelTokenHash && safeEqual(sha256(token), res.cancelTokenHash);
     if (!res || !ok || res.status === "cancelled" || res.status === "completed") {
       throw ApiError.notFound("Reservation not found or it can no longer be cancelled");
     }
-    return this.updateStatus(id, "cancelled");
+    return this.updateStatus(id, "cancelled", { source: "guest" });
   }
 }

@@ -13,6 +13,10 @@ cd "$(dirname "$0")/.."
 
 [ -f dist/server.js ] || { echo "dist/server.js not found. Run 'npm run build' first."; exit 1; }
 
+# The test servers must never touch a real database: blank the DB settings so a developer's .env cannot leak in
+# (values that are already set, even to nothing, are not overridden by .env).
+export DB_NAME="" DB_USER="" DB_PASSWORD=""
+
 PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT

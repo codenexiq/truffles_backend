@@ -9,6 +9,7 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 import { notFoundHandler } from "./middlewares/notFoundHandler.js";
 import { extraSecurityHeaders, noStore, originGuard, requireJson } from "./middlewares/security.js";
 import { apiRouter } from "./routes/index.js";
+import { mediaUploadRoutes } from "./modules/media/media.routes.js";
 
 export function createApp() {
   const app = express();
@@ -55,6 +56,10 @@ export function createApp() {
 
   // Abuse control before any parsing work is done.
   app.use(globalRateLimiter);
+
+  // Image uploads from the dashboard send the picture itself (not JSON), so this one staff-only route is handled
+  // here, before the JSON-only rules below. It has its own login check, size limit and upload rate limit.
+  app.use(`${env.API_PREFIX}/dashboard/media`, cookieParser(), mediaUploadRoutes);
 
   // Small, JSON-only bodies. (No urlencoded/form parsing: the API has no use for it.)
   app.use(requireJson);

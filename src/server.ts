@@ -1,6 +1,32 @@
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./utils/logger.js";
+import { dbConfigured } from "./db/pool.js";
+import { initDatabase } from "./db/migrate.js";
+import { bootstrapStaff } from "./modules/auth/auth.service.js";
+
+// Connect to the database (and create any missing tables) BEFORE accepting traffic. If it cannot connect in
+// production the process exits, so the deploy health check fails and the previous release stays live.
+if (dbConfigured) {
+  try {
+    await initDatabase();
+    logger.info(`Database connected (${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME})`);
+  } catch (error) {
+    logger.error("Database connection failed:", (error as Error).message);
+    if (env.isProd) process.exit(1);
+    logger.warn("Continuing without the database (development): reservations will not be saved.");
+  }
+} else if (env.isProd) {
+  logger.warn("No database configured (DB_NAME / DB_USER empty): reservations are kept in memory and lost on restart.");
+}
+
+// The administrator account (created in the database on first start; see bootstrapStaff).
+try {
+  await bootstrapStaff();
+} catch (error) {
+  logger.error("Could not set up the admin account:", (error as Error).message);
+  if (env.isProd) process.exit(1);
+}
 
 const app = createApp();
 

@@ -3,7 +3,7 @@ import { ZodError, type ZodSchema } from "zod";
 import { ApiError } from "../utils/apiError.js";
 
 export const validate = (schema: ZodSchema) => {
-  return async (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = await schema.parseAsync({
         body: req.body,
@@ -16,6 +16,8 @@ export const validate = (schema: ZodSchema) => {
         if (p.body) req.body = p.body;
         if (p.query && typeof p.query === "object") {
           Object.assign(req.query, p.query);
+          // Express 5 builds req.query afresh on every read, so the checked-and-defaulted values are also kept here.
+          res.locals.query = p.query;
         }
         if (p.params && typeof p.params === "object") {
           Object.assign(req.params, p.params);

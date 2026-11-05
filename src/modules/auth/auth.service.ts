@@ -8,19 +8,9 @@ import { newId } from "../../utils/secure.js";
 import { JWT_AUDIENCE, JWT_ISSUER } from "../../middlewares/auth.js";
 import { clearFailedLogins, lockoutStatus, recordFailedLogin } from "../../security/sessionStore.js";
 import type { AuthUser } from "../../types/index.js";
-import type { UserRoleType } from "../../constants/index.js";
-
-interface UserRecord {
-  id: string;
-  name: string;
-  email: string;
-  passwordHash: string;
-  role: UserRoleType;
-  createdAt: string;
-}
+import { staffRepository, type StaffRecord } from "./staff.repository.js";
 
 const BCRYPT_ROUNDS = 12;
-const users: UserRecord[] = [];
 
 /**
  * A real hash of a random value. Comparing against it when the email is unknown
@@ -29,34 +19,53 @@ const users: UserRecord[] = [];
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), BCRYPT_ROUNDS);
 
 // ---------- First admin account (there are NO built-in default passwords) ----------
-function bootstrapAdmin() {
+/**
+ * Makes sure the administrator exists. Call once at startup, after the database is ready.
+ * ADMIN_EMAIL / ADMIN_PASSWORD_HASH from the environment define that account: it is created in the staff
+ * table if missing, and its password is brought in line with the environment if it was changed there.
+ */
+export async function bootstrapStaff(): Promise<void> {
   if (env.ADMIN_EMAIL && env.ADMIN_PASSWORD_HASH) {
-    users.push({
-      id: newId("user"),
-      name: "Administrator",
-      email: env.ADMIN_EMAIL.toLowerCase(),
-      passwordHash: env.ADMIN_PASSWORD_HASH,
-      role: "super_admin",
-      createdAt: new Date().toISOString(),
-    });
-    logger.info(`Admin account loaded from environment: ${env.ADMIN_EMAIL}`);
+    const email = env.ADMIN_EMAIL.toLowerCase();
+    const existing = await staffRepository.findByEmail(email);
+    if (!existing) {
+      await staffRepository.insert({
+        id: newId("user"),
+        name: "Administrator",
+        email,
+        passwordHash: env.ADMIN_PASSWORD_HASH,
+        role: "super_admin",
+        createdAt: new Date().toISOString(),
+      });
+      logger.info(`Admin account created: ${email}`);
+    } else if (existing.passwordHash !== env.ADMIN_PASSWORD_HASH || existing.role !== "super_admin") {
+      await staffRepository.updateCredentials(existing.id, env.ADMIN_PASSWORD_HASH, "super_admin");
+      logger.info(`Admin account updated from environment: ${email}`);
+    } else {
+      logger.info(`Admin account ready: ${email}`);
+    }
     return;
   }
 
   if (!env.isProd) {
     // Development convenience: a random password, printed once, never stored in the repo.
     const password = crypto.randomBytes(18).toString("base64url");
-    users.push({
-      id: newId("user"),
-      name: "Development Admin",
-      email: "admin@truffles.local",
-      passwordHash: bcrypt.hashSync(password, BCRYPT_ROUNDS),
-      role: "super_admin",
-      createdAt: new Date().toISOString(),
-    });
+    const email = "admin@truffles.local";
+    const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+    const existing = await staffRepository.findByEmail(email);
+    if (existing) await staffRepository.updateCredentials(existing.id, hash, "super_admin");
+    else
+      await staffRepository.insert({
+        id: newId("user"),
+        name: "Development Admin",
+        email,
+        passwordHash: hash,
+        role: "super_admin",
+        createdAt: new Date().toISOString(),
+      });
     logger.warn("-------------------------------------------------------");
     logger.warn("DEVELOPMENT ADMIN (new random password each start):");
-    logger.warn(`  email:    admin@truffles.local`);
+    logger.warn(`  email:    ${email}`);
     logger.warn(`  password: ${password}`);
     logger.warn("-------------------------------------------------------");
     return;
@@ -66,9 +75,8 @@ function bootstrapAdmin() {
     "No admin account configured: staff login is disabled. Set ADMIN_EMAIL and ADMIN_PASSWORD_HASH (see `npm run hash-password`)."
   );
 }
-bootstrapAdmin();
 
-const toAuthUser = (u: UserRecord): AuthUser => ({ id: u.id, email: u.email, name: u.name, role: u.role });
+const toAuthUser = (u: StaffRecord): AuthUser => ({ id: u.id, email: u.email, name: u.name, role: u.role });
 
 export class AuthService {
   static async login(emailInput: string, password: string): Promise<{ token: string; user: AuthUser; expiresAt: number }> {
@@ -80,7 +88,7 @@ export class AuthService {
       throw ApiError.tooManyRequests(`Too many failed attempts. Try again in ${Math.ceil(lock.retryAfterSeconds / 60)} minutes.`);
     }
 
-    const user = users.find((u) => u.email === email);
+    const user = await staffRepository.findByEmail(email);
     const ok = await bcrypt.compare(password, user ? user.passwordHash : DUMMY_HASH);
 
     if (!user || !ok) {
@@ -119,11 +127,11 @@ export class AuthService {
     }
 
     const email = emailInput.toLowerCase().trim();
-    if (users.some((u) => u.email === email)) {
+    if (await staffRepository.findByEmail(email)) {
       throw ApiError.conflict("User with this email already exists");
     }
 
-    const created: UserRecord = {
+    const created: StaffRecord = {
       id: newId("user"),
       name,
       email,
@@ -131,13 +139,13 @@ export class AuthService {
       role,
       createdAt: new Date().toISOString(),
     };
-    users.push(created);
+    await staffRepository.insert(created);
     logger.info(`Staff account created (${role}) by ${actor.role}`);
     return toAuthUser(created);
   }
 
   static async getProfile(userId: string): Promise<AuthUser> {
-    const user = users.find((u) => u.id === userId);
+    const user = await staffRepository.findById(userId);
     if (!user) throw ApiError.notFound("User not found");
     return toAuthUser(user);
   }
